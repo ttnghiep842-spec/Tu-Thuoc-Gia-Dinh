@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f766e">
+<title>Tủ thuốc gia đình</title>
+<link rel="manifest" href="manifest.json">
+<style>
+:root{--bg:#f4f7f6;--card:#fff;--text:#17211f;--muted:#6b7773;--primary:#0f766e;--danger:#dc2626;--warn:#d97706;--ok:#15803d;--border:#dfe7e4}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--text)}
+header{background:var(--primary);color:#fff;padding:18px 16px 20px;position:sticky;top:0;z-index:5}
+header h1{margin:0;font-size:22px} header p{margin:5px 0 0;opacity:.85;font-size:13px}
+main{max-width:900px;margin:auto;padding:14px}
+.toolbar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+input,select,textarea,button{font:inherit} input,select,textarea{width:100%;padding:11px 12px;border:1px solid var(--border);border-radius:10px;background:#fff}
+.search{flex:1;min-width:220px}.btn{border:0;border-radius:10px;padding:11px 14px;background:var(--primary);color:white;font-weight:600;cursor:pointer}.btn.secondary{background:#e8efed;color:#17423d}.btn.danger{background:#fee2e2;color:#991b1b}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}.stat{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px}.stat b{display:block;font-size:22px}.stat span{font-size:12px;color:var(--muted)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 1px 2px #00000008}
+.row{display:flex;justify-content:space-between;gap:12px}.name{font-weight:700;font-size:17px}.meta{color:var(--muted);font-size:13px;margin-top:3px}
+.badge{display:inline-block;padding:4px 8px;border-radius:999px;font-size:12px;font-weight:700;margin-top:8px}.ok{background:#dcfce7;color:#166534}.warn{background:#fef3c7;color:#92400e}.danger-b{background:#fee2e2;color:#991b1b}.neutral{background:#e5e7eb;color:#374151}
+.actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}.small{padding:8px 10px;font-size:13px}
+dialog{border:0;border-radius:16px;width:min(560px,calc(100% - 24px));padding:0;box-shadow:0 20px 60px #0004}dialog::backdrop{background:#0007}.modal{padding:18px}.modal h2{margin:0 0 14px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px;font-weight:600}.field.full{grid-column:1/-1}.footer-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+.empty{text-align:center;color:var(--muted);padding:40px 10px}
+.notice{font-size:12px;color:var(--muted);padding:10px 2px}
+@media(max-width:650px){.stats{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}.field.full{grid-column:auto}.row{align-items:flex-start}}
+</style>
+</head>
+<body>
+<header><h1>💊 Tủ thuốc gia đình</h1><p>Quản lý số lượng, hạn sử dụng và danh sách cần mua</p></header>
+<main>
+  <div class="toolbar">
+    <input id="search" class="search" placeholder="🔎 Tìm tên thuốc..." oninput="render()">
+    <button class="btn" onclick="openAdd()">＋ Thêm thuốc</button>
+    <button class="btn secondary" onclick="syncNow()">↻ Đồng bộ</button>
+  </div>
+  <section class="stats">
+    <div class="stat"><b id="total">0</b><span>Loại thuốc</span></div>
+    <div class="stat"><b id="low">0</b><span>Sắp hết</span></div>
+    <div class="stat"><b id="expiring">0</b><span>Sắp hết hạn</span></div>
+    <div class="stat"><b id="expired">0</b><span>Đã hết hạn</span></div>
+  </section>
+  <div id="list"></div>
+  <div class="notice">Ứng dụng này dùng để quản lý tủ thuốc, không thay thế tư vấn của bác sĩ/dược sĩ. Luôn kiểm tra nhãn và tờ hướng dẫn của thuốc trước khi sử dụng.</div>
+</main>
+
+<dialog id="dlg"><form method="dialog" class="modal" onsubmit="saveDrug(event)">
+<h2 id="dlgTitle">Thêm thuốc</h2>
+<div class="grid">
+  <div class="field full"><label>Tên thuốc *</label><input id="f_name" required></div>
+  <div class="field"><label>Số lượng *</label><input id="f_qty" type="number" min="0" step="1" required></div>
+  <div class="field"><label>Đơn vị</label><input id="f_unit" placeholder="viên, gói, chai..."></div>
+  <div class="field"><label>Hạn sử dụng</label><input id="f_expiry" type="date"></div>
+  <div class="field"><label>Mức tối thiểu</label><input id="f_min" type="number" min="0" step="1" value="3"></div>
+  <div class="field full"><label>Công dụng</label><textarea id="f_use" rows="2" placeholder="Nhập theo nhãn/tờ hướng dẫn..."></textarea></div>
+  <div class="field full"><label>Cách dùng</label><textarea id="f_dose" rows="2" placeholder="Nhập theo nhãn/tờ hướng dẫn..."></textarea></div>
+  <div class="field full"><label>Ghi chú / vị trí</label><input id="f_note"></div>
+</div>
+<div class="footer-actions"><button class="btn secondary" type="button" onclick="dlg.close()">Hủy</button><button class="btn" type="submit">Lưu</button></div>
+</form></dialog>
+
+<script>
+const KEY="family_medicine_v1";
+const API_URL=""; // Dán URL Web App Google Apps Script vào đây nếu muốn đồng bộ.
+let drugs=JSON.parse(localStorage.getItem(KEY)||"[]");
+let editing=null;
+
+function persist(){localStorage.setItem(KEY,JSON.stringify(drugs))}
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
+function daysTo(d){if(!d)return Infinity;return Math.ceil((new Date(d+"T23:59:59")-new Date())/86400000)}
+function status(x){
+  const d=daysTo(x.expiry);
+  if(d<0)return ["Đã hết hạn","danger-b"];
+  if(d<=90)return ["Sắp hết hạn","warn"];
+  if(Number(x.qty)<=Number(x.minQty))return ["Sắp hết","warn"];
+  return ["Đang đủ","ok"];
+}
+function render(){
+  const q=document.getElementById("search").value.toLowerCase();
+  const filtered=drugs.filter(x=>x.name.toLowerCase().includes(q));
+  document.getElementById("total").textContent=drugs.length;
+  document.getElementById("low").textContent=drugs.filter(x=>+x.qty<=+x.minQty).length;
+  document.getElementById("expiring").textContent=drugs.filter(x=>x.expiry&&daysTo(x.expiry)>=0&&daysTo(x.expiry)<=90).length;
+  document.getElementById("expired").textContent=drugs.filter(x=>x.expiry&&daysTo(x.expiry)<0).length;
+  const el=document.getElementById("list");
+  if(!filtered.length){el.innerHTML='<div class="card empty">Chưa có thuốc phù hợp.<br>Bấm <b>＋ Thêm thuốc</b> để bắt đầu.</div>';return}
+  el.innerHTML=filtered.map(x=>{
+    const [st,cls]=status(x);
+    const exp=x.expiry?new Date(x.expiry).toLocaleDateString("vi-VN"):"Chưa nhập";
+    return `<article class="card">
+      <div class="row"><div><div class="name">${esc(x.name)}</div><div class="meta">${x.qty} ${esc(x.unit||"đơn vị")} · HSD: ${exp}</div></div><span class="badge ${cls}">${st}</span></div>
+      ${x.use?`<div class="meta" style="margin-top:10px"><b>Công dụng:</b> ${esc(x.use)}</div>`:""}
+      ${x.dose?`<div class="meta"><b>Cách dùng:</b> ${esc(x.dose)}</div>`:""}
+      ${x.note?`<div class="meta"><b>Ghi chú:</b> ${esc(x.note)}</div>`:""}
+      <div class="actions">
+        <button class="btn small secondary" onclick="changeQty('${x.id}',-1)">− 1</button>
+        <button class="btn small" onclick="changeQty('${x.id}',1)">＋ 1</button>
+        <button class="btn small secondary" onclick="openEdit('${x.id}')">Sửa</button>
+        <button class="btn small danger" onclick="removeDrug('${x.id}')">Xóa</button>
+      </div>
+    </article>`;
+  }).join("");
+}
+function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
+function openAdd(){editing=null;document.getElementById("dlgTitle").textContent="Thêm thuốc";document.querySelectorAll("#dlg input,#dlg textarea").forEach(e=>e.value="");document.getElementById("f_qty").value=0;document.getElementById("f_min").value=3;dlg.showModal()}
+function openEdit(id){const x=drugs.find(a=>a.id===id);if(!x)return;editing=id;document.getElementById("dlgTitle").textContent="Sửa thuốc";f_name.value=x.name;f_qty.value=x.qty;f_unit.value=x.unit||"";f_expiry.value=x.expiry||"";f_min.value=x.minQty??3;f_use.value=x.use||"";f_dose.value=x.dose||"";f_note.value=x.note||"";dlg.showModal()}
+function saveDrug(e){e.preventDefault();const x={id:editing||uid(),name:f_name.value.trim(),qty:+f_qty.value,unit:f_unit.value.trim(),expiry:f_expiry.value,minQty:+f_min.value,use:f_use.value.trim(),dose:f_dose.value.trim(),note:f_note.value.trim()};if(editing)drugs=drugs.map(a=>a.id===editing?x:a);else drugs.unshift(x);persist();dlg.close();render();syncNow()}
+function changeQty(id,n){const x=drugs.find(a=>a.id===id);if(!x)return;x.qty=Math.max(0,+x.qty+n);persist();render();syncNow()}
+function removeDrug(id){if(confirm("Xóa thuốc này khỏi danh sách?")){drugs=drugs.filter(x=>x.id!==id);persist();render();syncNow()}}
+async function syncNow(){
+  if(!API_URL){return}
+  try{
+    const r=await fetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"replaceAll",drugs})});
+    if(!r.ok)throw new Error();
+  }catch(e){console.warn("Chưa đồng bộ được:",e)}
+}
+render();
+</script>
+</body>
+</html>
