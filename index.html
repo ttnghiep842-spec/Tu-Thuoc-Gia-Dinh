@@ -80,7 +80,7 @@ function status(x){
   if(d<0)return ["Đã hết hạn","danger-b"];
   if(Number(x.qty)<=0)return ["Hết thuốc","danger-b"];
   if(d<=90)return ["Sắp hết hạn","warn"];
-  if(Number(x.qty)<=Number(x.minQty))return ["Sắp hết","warn"];
+  if(Number(x.qty)<Number(x.minQty))return ["Sắp hết","warn"];
   return ["Đang đủ","ok"];
 }
 function render(){
@@ -88,7 +88,7 @@ function render(){
   const filtered=drugs.filter(x=>x.name.toLowerCase().includes(q));
   document.getElementById("total").textContent=drugs.length;
   document.getElementById("outOfStock").textContent=drugs.filter(x=>+x.qty<=0).length;
-  document.getElementById("low").textContent=drugs.filter(x=>+x.qty>0&&+x.qty<=+x.minQty).length;
+  document.getElementById("low").textContent=drugs.filter(x=>+x.qty>0&&+x.qty<+x.minQty).length;
   document.getElementById("expiring").textContent=drugs.filter(x=>x.expiry&&daysTo(x.expiry)>=0&&daysTo(x.expiry)<=90).length;
   document.getElementById("expired").textContent=drugs.filter(x=>x.expiry&&daysTo(x.expiry)<0).length;
   const el=document.getElementById("list");
