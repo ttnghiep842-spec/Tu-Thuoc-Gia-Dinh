@@ -23,6 +23,7 @@ input,select,textarea,button{font:inherit} input,select,textarea{width:100%;padd
 dialog{border:0;border-radius:16px;width:min(560px,calc(100% - 24px));padding:0;box-shadow:0 20px 60px #0004}dialog::backdrop{background:#0007}.modal{padding:18px}.modal h2{margin:0 0 14px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px;font-weight:600}.field.full{grid-column:1/-1}.footer-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 .empty{text-align:center;color:var(--muted);padding:40px 10px}
 .notice{font-size:12px;color:var(--muted);padding:10px 2px}
+.sync-status{font-size:12px;color:var(--muted);align-self:center}
 @media(max-width:650px){.stats{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}.field.full{grid-column:auto}.row{align-items:flex-start}}
 </style>
 </head>
@@ -33,6 +34,7 @@ dialog{border:0;border-radius:16px;width:min(560px,calc(100% - 24px));padding:0;
     <input id="search" class="search" placeholder="🔎 Tìm tên thuốc..." oninput="render()">
     <button class="btn" onclick="openAdd()">＋ Thêm thuốc</button>
     <button class="btn secondary" onclick="syncNow()">↻ Đồng bộ</button>
+    <span id="syncStatus" class="sync-status" role="status" aria-live="polite">Đang tải dữ liệu…</span>
   </div>
   <section class="stats">
     <div class="stat"><b id="total">0</b><span>Loại thuốc</span></div>
@@ -61,11 +63,14 @@ dialog{border:0;border-radius:16px;width:min(560px,calc(100% - 24px));padding:0;
 
 <script>
 const KEY="family_medicine_v1";
-const API_URL=""; // Dán URL Web App Google Apps Script vào đây nếu muốn đồng bộ.
+const API_URL="https://script.google.com/macros/s/AKfycbxRvYeBDShVGNq4Kd0th4M-FAakYhs-WW_Y-Ik_9IQan8rzWjjS-ncOUnCVxgapyBS8/exec"; // Dán URL Web App /exec của Google Apps Script vào đây.
 let drugs=JSON.parse(localStorage.getItem(KEY)||"[]");
 let editing=null;
+let cloudReady=false;
+let saveQueue=Promise.resolve();
 
 function persist(){localStorage.setItem(KEY,JSON.stringify(drugs))}
+function setSyncStatus(message){document.getElementById("syncStatus").textContent=message}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
 function daysTo(d){if(!d)return Infinity;return Math.ceil((new Date(d+"T23:59:59")-new Date())/86400000)}
 function status(x){
@@ -104,17 +109,54 @@ function render(){
 function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
 function openAdd(){editing=null;document.getElementById("dlgTitle").textContent="Thêm thuốc";document.querySelectorAll("#dlg input,#dlg textarea").forEach(e=>e.value="");document.getElementById("f_qty").value=0;document.getElementById("f_min").value=3;dlg.showModal()}
 function openEdit(id){const x=drugs.find(a=>a.id===id);if(!x)return;editing=id;document.getElementById("dlgTitle").textContent="Sửa thuốc";f_name.value=x.name;f_qty.value=x.qty;f_unit.value=x.unit||"";f_expiry.value=x.expiry||"";f_min.value=x.minQty??3;f_use.value=x.use||"";f_dose.value=x.dose||"";f_note.value=x.note||"";dlg.showModal()}
-function saveDrug(e){e.preventDefault();const x={id:editing||uid(),name:f_name.value.trim(),qty:+f_qty.value,unit:f_unit.value.trim(),expiry:f_expiry.value,minQty:+f_min.value,use:f_use.value.trim(),dose:f_dose.value.trim(),note:f_note.value.trim()};if(editing)drugs=drugs.map(a=>a.id===editing?x:a);else drugs.unshift(x);persist();dlg.close();render();syncNow()}
-function changeQty(id,n){const x=drugs.find(a=>a.id===id);if(!x)return;x.qty=Math.max(0,+x.qty+n);persist();render();syncNow()}
-function removeDrug(id){if(confirm("Xóa thuốc này khỏi danh sách?")){drugs=drugs.filter(x=>x.id!==id);persist();render();syncNow()}}
-async function syncNow(){
-  if(!API_URL){return}
-  try{
-    const r=await fetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"replaceAll",drugs})});
-    if(!r.ok)throw new Error();
-  }catch(e){console.warn("Chưa đồng bộ được:",e)}
+function saveDrug(e){e.preventDefault();const x={id:editing||uid(),name:f_name.value.trim(),qty:+f_qty.value,unit:f_unit.value.trim(),expiry:f_expiry.value,minQty:+f_min.value,use:f_use.value.trim(),dose:f_dose.value.trim(),note:f_note.value.trim()};if(editing)drugs=drugs.map(a=>a.id===editing?x:a);else drugs.unshift(x);persist();dlg.close();render();pushAll()}
+function changeQty(id,n){const x=drugs.find(a=>a.id===id);if(!x)return;x.qty=Math.max(0,+x.qty+n);persist();render();pushAll()}
+function removeDrug(id){if(confirm("Xóa thuốc này khỏi danh sách?")){drugs=drugs.filter(x=>x.id!==id);persist();render();pushAll()}}
+async function pushAll(){
+  if(!API_URL){setSyncStatus("Chưa cấu hình đồng bộ Sheets");return}
+  if(!cloudReady){setSyncStatus("Đang tải dữ liệu… thử lại sau giây lát");return}
+  const snapshot=JSON.stringify(drugs);
+  saveQueue=saveQueue.then(async()=>{
+    setSyncStatus("Đang lưu lên Google Sheets…");
+    const r=await fetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"replaceAll",drugs:JSON.parse(snapshot)})});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const result=await r.json();
+    if(!result.ok)throw new Error(result.error||"Không lưu được");
+    setSyncStatus("Đã đồng bộ Google Sheets");
+  }).catch(e=>{console.warn("Chưa đồng bộ được:",e);setSyncStatus("Lỗi đồng bộ — dữ liệu vẫn lưu trên thiết bị này")});
+  return saveQueue;
 }
-render();
+async function syncNow(){
+  if(!API_URL){setSyncStatus("Chưa cấu hình đồng bộ Sheets");return}
+  if(!cloudReady){setSyncStatus("Đang tải dữ liệu… thử lại sau giây lát");return}
+  try{
+    setSyncStatus("Đang tải dữ liệu từ Google Sheets…");
+    const r=await fetch(API_URL,{cache:"no-store"});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const result=await r.json();
+    if(!result.ok||!Array.isArray(result.drugs))throw new Error("Phản hồi API không hợp lệ");
+    if(result.drugs.length){drugs=result.drugs;persist();render();setSyncStatus("Đã tải dữ liệu từ Google Sheets")}
+    else if(drugs.length)await pushAll();
+    else setSyncStatus("Google Sheets đang trống");
+  }catch(e){console.warn("Không đồng bộ được:",e);setSyncStatus("Lỗi đồng bộ — dữ liệu vẫn lưu trên thiết bị này")}
+}
+async function initCloud(){
+  render();
+  if(!API_URL){cloudReady=true;setSyncStatus("Chưa cấu hình đồng bộ Sheets");return}
+  try{
+    setSyncStatus("Đang tải dữ liệu từ Google Sheets…");
+    const r=await fetch(API_URL,{cache:"no-store"});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const result=await r.json();
+    if(!result.ok||!Array.isArray(result.drugs))throw new Error("Phản hồi API không hợp lệ");
+    if(result.drugs.length){drugs=result.drugs;persist();render();setSyncStatus("Đã tải dữ liệu từ Google Sheets")}
+    else if(drugs.length){setSyncStatus("Đang đưa dữ liệu trên thiết bị này lên Sheet lần đầu…")}
+    cloudReady=true;
+    if(!result.drugs.length&&drugs.length)await syncNow();
+    else if(!result.drugs.length)setSyncStatus("Google Sheets đang trống; sẵn sàng đồng bộ")
+  }catch(e){console.warn("Không tải được dữ liệu Google Sheets:",e);cloudReady=false;setSyncStatus("Không kết nối được Sheets — kiểm tra URL và quyền triển khai")}
+}
+initCloud();
 </script>
 </body>
 </html>
