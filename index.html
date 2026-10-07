@@ -4,8 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f766e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Tủ thuốc">
 <title>Tủ thuốc gia đình</title>
 <link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
 <style>
 :root{--bg:#f4f7f6;--card:#fff;--text:#17211f;--muted:#6b7773;--primary:#0f766e;--danger:#dc2626;--warn:#d97706;--ok:#15803d;--border:#dfe7e4}
 *{box-sizing:border-box} body{margin:0;background:var(--bg);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--text)}
@@ -18,7 +22,7 @@ input,select,textarea,button{font:inherit} input,select,textarea{width:100%;padd
 .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:12px}.stat{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px}.stat b{display:block;font-size:22px}.stat span{font-size:12px;color:var(--muted)}
 .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 1px 2px #00000008}
 .row{display:flex;justify-content:space-between;gap:12px}.name{font-weight:700;font-size:17px}.meta{color:var(--muted);font-size:13px;margin-top:3px}
-.badge{display:inline-block;padding:4px 8px;border-radius:999px;font-size:12px;font-weight:700;margin-top:8px}.ok{background:#dcfce7;color:#166534}.warn{background:#fef3c7;color:#92400e}.danger-b{background:#fee2e2;color:#991b1b}.neutral{background:#e5e7eb;color:#374151}
+.badges{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.badge{display:inline-block;padding:4px 8px;border-radius:999px;font-size:12px;font-weight:700;margin-top:8px}.ok{background:#dcfce7;color:#166534}.warn{background:#fef3c7;color:#92400e}.danger-b{background:#fee2e2;color:#991b1b}.neutral{background:#e5e7eb;color:#374151}
 .actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}.small{padding:8px 10px;font-size:13px}
 dialog{border:0;border-radius:16px;width:min(560px,calc(100% - 24px));padding:0;box-shadow:0 20px 60px #0004}dialog::backdrop{background:#0007}.modal{padding:18px}.modal h2{margin:0 0 14px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px;font-weight:600}.field.full{grid-column:1/-1}.footer-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 .empty{text-align:center;color:var(--muted);padding:40px 10px}
@@ -76,12 +80,13 @@ function setSyncStatus(message){document.getElementById("syncStatus").textConten
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
 function daysTo(d){if(!d)return Infinity;return Math.ceil((new Date(d+"T23:59:59")-new Date())/86400000)}
 function status(x){
+  if(Number(x.qty)<=0)return [["Hết thuốc","danger-b"]];
   const d=daysTo(x.expiry);
-  if(d<0)return ["Đã hết hạn","danger-b"];
-  if(Number(x.qty)<=0)return ["Hết thuốc","danger-b"];
-  if(d<=90)return ["Sắp hết hạn","warn"];
-  if(Number(x.qty)<Number(x.minQty))return ["Sắp hết","warn"];
-  return ["Đang đủ","ok"];
+  const alerts=[];
+  if(d<0)alerts.push(["Đã hết hạn","danger-b"]);
+  else if(d<=90)alerts.push(["Sắp hết hạn","warn"]);
+  if(Number(x.qty)<Number(x.minQty))alerts.push(["Sắp hết","warn"]);
+  return alerts.length?alerts:[["Đang đủ","ok"]];
 }
 function render(){
   const q=document.getElementById("search").value.toLowerCase();
@@ -89,15 +94,15 @@ function render(){
   document.getElementById("total").textContent=drugs.length;
   document.getElementById("outOfStock").textContent=drugs.filter(x=>+x.qty<=0).length;
   document.getElementById("low").textContent=drugs.filter(x=>+x.qty>0&&+x.qty<+x.minQty).length;
-  document.getElementById("expiring").textContent=drugs.filter(x=>x.expiry&&daysTo(x.expiry)>=0&&daysTo(x.expiry)<=90).length;
-  document.getElementById("expired").textContent=drugs.filter(x=>x.expiry&&daysTo(x.expiry)<0).length;
+  document.getElementById("expiring").textContent=drugs.filter(x=>+x.qty>0&&x.expiry&&daysTo(x.expiry)>=0&&daysTo(x.expiry)<=90).length;
+  document.getElementById("expired").textContent=drugs.filter(x=>+x.qty>0&&x.expiry&&daysTo(x.expiry)<0).length;
   const el=document.getElementById("list");
   if(!filtered.length){el.innerHTML='<div class="card empty">Chưa có thuốc phù hợp.<br>Bấm <b>＋ Thêm thuốc</b> để bắt đầu.</div>';return}
   el.innerHTML=filtered.map(x=>{
-    const [st,cls]=status(x);
+    const badges=status(x).map(([label,cls])=>`<span class="badge ${cls}">${label}</span>`).join("");
     const exp=x.expiry?new Date(x.expiry).toLocaleDateString("vi-VN"):"Chưa nhập";
     return `<article class="card">
-      <div class="row"><div><div class="name">${esc(x.name)}</div><div class="meta">${x.qty} ${esc(x.unit||"đơn vị")} · HSD: ${exp}</div></div><span class="badge ${cls}">${st}</span></div>
+      <div class="row"><div><div class="name">${esc(x.name)}</div><div class="meta">${x.qty} ${esc(x.unit||"đơn vị")} · HSD: ${exp}</div></div><div class="badges">${badges}</div></div>
       ${x.use?`<div class="meta" style="margin-top:10px"><b>Công dụng:</b> ${esc(x.use)}</div>`:""}
       ${x.dose?`<div class="meta"><b>Cách dùng:</b> ${esc(x.dose)}</div>`:""}
       ${x.note?`<div class="meta"><b>Ghi chú:</b> ${esc(x.note)}</div>`:""}
