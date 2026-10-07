@@ -1,9 +1,25 @@
 {
+  "id": "./",
   "name": "Tủ thuốc gia đình",
   "short_name": "Tủ thuốc",
+  "description": "Quản lý số lượng và hạn sử dụng thuốc trong gia đình",
   "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#f4f7f6",
   "theme_color": "#0f766e",
-  "icons": []
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
 }
