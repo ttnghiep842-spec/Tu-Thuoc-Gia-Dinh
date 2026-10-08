@@ -28,6 +28,8 @@ dialog{border:0;border-radius:16px;width:min(560px,calc(100% - 24px));padding:0;
 .empty{text-align:center;color:var(--muted);padding:40px 10px}
 .notice{font-size:12px;color:var(--muted);padding:10px 2px}
 .sync-status{font-size:12px;color:var(--muted);align-self:center}
+.tabs{display:flex;gap:8px;margin:0 0 12px}.tab{border:1px solid var(--border);background:#fff;color:var(--text);border-radius:999px;padding:9px 14px;font-weight:650;cursor:pointer}.tab.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+.drug-image{width:76px;height:76px;object-fit:cover;border-radius:12px;border:1px solid var(--border);background:#f3f6f5;flex:none}.library-card{display:flex;gap:12px}.library-info{min-width:0;flex:1}.image-preview{display:block;max-width:180px;max-height:140px;object-fit:contain;border-radius:10px;margin-top:8px}.btn:disabled{opacity:.55;cursor:wait}
 @media(max-width:800px){.stats{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:650px){.grid{grid-template-columns:1fr}.field.full{grid-column:auto}.row{align-items:flex-start}}
 </style>
@@ -35,12 +37,14 @@ dialog{border:0;border-radius:16px;width:min(560px,calc(100% - 24px));padding:0;
 <body>
 <header><h1>💊 Tủ thuốc gia đình</h1><p>Quản lý số lượng, hạn sử dụng và danh sách cần mua</p></header>
 <main>
-  <div class="toolbar">
+  <div id="cabinetToolbar" class="toolbar">
     <input id="search" class="search" placeholder="🔎 Tìm tên thuốc..." oninput="render()">
     <button class="btn" onclick="openAdd()">＋ Thêm thuốc</button>
     <button class="btn secondary" onclick="syncNow()">↻ Đồng bộ</button>
     <span id="syncStatus" class="sync-status" role="status" aria-live="polite">Đang tải dữ liệu…</span>
   </div>
+  <nav class="tabs" aria-label="Danh mục"><button id="tabCabinet" class="tab active" onclick="switchView('cabinet')">Tủ thuốc</button><button id="tabLibrary" class="tab" onclick="switchView('library')">Thư viện thuốc</button></nav>
+  <section id="cabinetView">
   <section class="stats">
     <div class="stat"><b id="total">0</b><span>Loại thuốc</span></div>
     <div class="stat"><b id="outOfStock">0</b><span>Hết thuốc</span></div>
@@ -49,6 +53,12 @@ dialog{border:0;border-radius:16px;width:min(560px,calc(100% - 24px));padding:0;
     <div class="stat"><b id="expired">0</b><span>Đã hết hạn</span></div>
   </section>
   <div id="list"></div>
+  </section>
+  <section id="libraryView" hidden>
+    <div class="toolbar"><input id="libraryFilter" class="search" placeholder="🔎 Tìm thuốc trong thư viện..." oninput="renderLibrary()"><button class="btn" onclick="openLibraryAdd()">＋ Thêm thuốc vào thư viện</button></div>
+    <div class="notice">Thư viện giữ thông tin thuốc để dùng lại. Xóa thuốc khỏi tủ sẽ không xóa khỏi thư viện; xóa tại đây sẽ xóa hẳn khỏi Google Sheets và các thiết bị đồng bộ.</div>
+    <div id="libraryList"></div>
+  </section>
   <div class="notice">Ứng dụng này dùng để quản lý tủ thuốc, không thay thế tư vấn của bác sĩ/dược sĩ. Luôn kiểm tra nhãn và tờ hướng dẫn của thuốc trước khi sử dụng.</div>
 </main>
 
@@ -62,17 +72,33 @@ dialog{border:0;border-radius:16px;width:min(560px,calc(100% - 24px));padding:0;
   <div class="field"><label>Mức tối thiểu</label><input id="f_min" type="number" min="0" step="1" value="3"></div>
   <div class="field full"><label>Công dụng</label><textarea id="f_use" rows="2" placeholder="Nhập theo nhãn/tờ hướng dẫn..."></textarea></div>
   <div class="field full"><label>Cách dùng</label><textarea id="f_dose" rows="2" placeholder="Nhập theo nhãn/tờ hướng dẫn..."></textarea></div>
+  <div class="field full"><label>Ảnh thuốc</label><div class="actions"><button class="btn small secondary" type="button" onclick="document.getElementById('f_camera').click()">Chụp ảnh</button><button class="btn small secondary" type="button" onclick="document.getElementById('f_upload').click()">Tải ảnh lên</button><button class="btn small danger" type="button" onclick="clearDrugImage()">Bỏ ảnh</button></div><input id="f_image" type="hidden"><input id="f_camera" type="file" accept="image/*" capture="environment" hidden onchange="readDrugImage(this)"><input id="f_upload" type="file" accept="image/*" hidden onchange="readDrugImage(this)"><img id="f_image_preview" class="image-preview" hidden alt="Ảnh thuốc xem trước"></div>
   <div class="field full"><label>Ghi chú / vị trí</label><input id="f_note"></div>
 </div>
+<button id="pickLibraryButton" class="btn small secondary" type="button" onclick="openLibraryPicker()">Chọn thông tin từ thư viện</button>
 <div class="footer-actions"><button class="btn secondary" type="button" onclick="dlg.close()">Hủy</button><button class="btn" type="submit">Lưu</button></div>
 </form></dialog>
+<dialog id="libraryDlg"><form method="dialog" class="modal" onsubmit="saveLibraryEntry(event)">
+<h2 id="libraryDlgTitle">Thêm vào thư viện</h2><div class="grid">
+  <div class="field full"><label>Tên thuốc *</label><input id="l_name" required></div>
+  <div class="field full"><label>Ảnh thuốc</label><div class="actions"><button class="btn small secondary" type="button" onclick="document.getElementById('l_camera').click()">Chụp ảnh</button><button class="btn small secondary" type="button" onclick="document.getElementById('l_upload').click()">Tải ảnh lên</button><button class="btn small danger" type="button" onclick="clearLibraryImage()">Bỏ ảnh</button></div><input id="l_image" type="hidden"><input id="l_camera" type="file" accept="image/*" capture="environment" hidden onchange="readLibraryImage(this)"><input id="l_upload" type="file" accept="image/*" hidden onchange="readLibraryImage(this)"><img id="l_image_preview" class="image-preview" hidden alt="Ảnh thuốc xem trước"></div>
+  <div class="field full"><label>Công dụng</label><textarea id="l_use" rows="2" placeholder="Nhập tiếng Việt theo nhãn/tờ hướng dẫn..."></textarea></div>
+  <div class="field full"><label>Liều dùng / cách dùng</label><textarea id="l_dose" rows="2" placeholder="Ghi rõ hàm lượng, dạng thuốc, độ tuổi và cách dùng theo tờ hướng dẫn..."></textarea></div>
+</div><div class="footer-actions"><button class="btn secondary" type="button" onclick="libraryDlg.close()">Hủy</button><button class="btn" type="submit">Lưu</button></div></form></dialog>
+<dialog id="pickerDlg"><form method="dialog" class="modal"><h2>Chọn thuốc từ thư viện</h2><input id="pickerSearch" class="search" placeholder="Tìm tên thuốc..." oninput="renderLibraryPicker()"><div id="pickerList" style="margin-top:12px;max-height:55vh;overflow:auto"></div><div class="footer-actions"><button class="btn secondary" type="submit">Đóng</button></div></form></dialog>
 
 <script>
 const KEY="family_medicine_v1";
+const LIBRARY_KEY="family_medicine_library_v1";
 const API_URL="https://script.google.com/macros/s/AKfycbxRvYeBDShVGNq4Kd0th4M-FAakYhs-WW_Y-Ik_9IQan8rzWjjS-ncOUnCVxgapyBS8/exec"; // Dán URL Web App /exec của Google Apps Script vào đây.
 let drugs=JSON.parse(localStorage.getItem(KEY)||"[]");
+let library=JSON.parse(localStorage.getItem(LIBRARY_KEY)||"[]");
 let editing=null;
+let editingLibrary=null;
+let selectedLibraryId=null;
 let cloudReady=false;
+let cloudHasData=false;
+let keepLocalWithoutCloud=false;
 let saveQueue=Promise.resolve();
 
 function persist(){localStorage.setItem(KEY,JSON.stringify(drugs))}
@@ -101,8 +127,9 @@ function render(){
   el.innerHTML=filtered.map(x=>{
     const badges=status(x).map(([label,cls])=>`<span class="badge ${cls}">${label}</span>`).join("");
     const exp=x.expiry?new Date(x.expiry).toLocaleDateString("vi-VN"):"Chưa nhập";
+    const image=safeImageSrc(x.image);
     return `<article class="card">
-      <div class="row"><div><div class="name">${esc(x.name)}</div><div class="meta">${x.qty} ${esc(x.unit||"đơn vị")} · HSD: ${exp}</div></div><div class="badges">${badges}</div></div>
+      <div class="row"><div style="display:flex;gap:10px">${image?`<img class="drug-image" src="${image}" alt="Ảnh ${esc(x.name)}" loading="lazy" onerror="this.hidden=true">`:''}<div><div class="name">${esc(x.name)}</div><div class="meta">${x.qty} ${esc(x.unit||"đơn vị")} · HSD: ${exp}</div></div></div><div class="badges">${badges}</div></div>
       ${x.use?`<div class="meta" style="margin-top:10px"><b>Công dụng:</b> ${esc(x.use)}</div>`:""}
       ${x.dose?`<div class="meta"><b>Cách dùng:</b> ${esc(x.dose)}</div>`:""}
       ${x.note?`<div class="meta"><b>Ghi chú:</b> ${esc(x.note)}</div>`:""}
@@ -116,14 +143,30 @@ function render(){
   }).join("");
 }
 function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
-function openAdd(){editing=null;document.getElementById("dlgTitle").textContent="Thêm thuốc";document.querySelectorAll("#dlg input,#dlg textarea").forEach(e=>e.value="");document.getElementById("f_qty").value=0;document.getElementById("f_min").value=3;dlg.showModal()}
-function openEdit(id){const x=drugs.find(a=>a.id===id);if(!x)return;editing=id;document.getElementById("dlgTitle").textContent="Sửa thuốc";f_name.value=x.name;f_qty.value=x.qty;f_unit.value=x.unit||"";f_expiry.value=x.expiry||"";f_min.value=x.minQty??3;f_use.value=x.use||"";f_dose.value=x.dose||"";f_note.value=x.note||"";dlg.showModal()}
-function saveDrug(e){e.preventDefault();const x={id:editing||uid(),name:f_name.value.trim(),qty:+f_qty.value,unit:f_unit.value.trim(),expiry:f_expiry.value,minQty:+f_min.value,use:f_use.value.trim(),dose:f_dose.value.trim(),note:f_note.value.trim()};if(editing)drugs=drugs.map(a=>a.id===editing?x:a);else drugs.unshift(x);persist();dlg.close();render();pushAll()}
+function safeImageSrc(s){const v=String(s||"");if(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(v))return v;try{const u=new URL(v);return u.protocol==="https:"||u.protocol==="http:"?u.href:""}catch{return ""}}
+function switchView(view){document.getElementById("cabinetView").hidden=view!=="cabinet";document.getElementById("libraryView").hidden=view!=="library";document.getElementById("cabinetToolbar").hidden=view!=="cabinet";document.getElementById("tabCabinet").classList.toggle("active",view==="cabinet");document.getElementById("tabLibrary").classList.toggle("active",view==="library");if(view==="library")renderLibrary()}
+function renderLibrary(){const q=(document.getElementById("libraryFilter").value||"").trim().toLocaleLowerCase("vi");const entries=library.filter(x=>(x.name||"").toLocaleLowerCase("vi").includes(q));const el=document.getElementById("libraryList");if(!entries.length){el.innerHTML='<div class="card empty">'+(library.length?'Không tìm thấy thuốc phù hợp.':'Thư viện chưa có thuốc. Bấm “＋ Thêm thuốc vào thư viện” để bắt đầu.')+'</div>';return}el.innerHTML=entries.map(x=>{const image=safeImageSrc(x.image);return `<article class="card library-card">${image?`<img class="drug-image" src="${image}" alt="Ảnh ${esc(x.name)}" loading="lazy" onerror="this.hidden=true">`:''}<div class="library-info"><div class="name">${esc(x.name)}</div>${x.use?`<div class="meta" style="margin-top:8px"><b>Công dụng:</b> ${esc(x.use)}</div>`:''}${x.dose?`<div class="meta"><b>Cách dùng:</b> ${esc(x.dose)}</div>`:''}<div class="actions"><button class="btn small" onclick="addFromLibrary('${esc(x.id)}')">＋ Thêm vào tủ</button><button class="btn small secondary" onclick="openLibraryEdit('${esc(x.id)}')">Sửa</button><button class="btn small danger" onclick="removeLibraryEntry('${esc(x.id)}')">Xóa hẳn</button></div></div></article>`}).join("")}
+async function compressImage(file){const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file)});const img=await new Promise((resolve,reject)=>{const i=new Image();i.onload=()=>resolve(i);i.onerror=reject;i.src=data});const canvas=document.createElement("canvas");let scale=Math.min(1,420/Math.max(img.width,img.height));for(let n=0;n<8;n++){canvas.width=Math.max(1,Math.round(img.width*scale));canvas.height=Math.max(1,Math.round(img.height*scale));const ctx=canvas.getContext("2d");ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(img,0,0,canvas.width,canvas.height);for(let quality=.78;quality>=.35;quality-=.1){const result=canvas.toDataURL("image/jpeg",quality);if(result.length<=44000)return result}scale*=.78}throw new Error("Ảnh quá lớn để lưu vào Google Sheets")}
+async function acceptImage(input,field,preview){const file=input.files?.[0];input.value="";if(!file)return;try{const value=await compressImage(file);document.getElementById(field).value=value;const img=document.getElementById(preview);img.src=value;img.hidden=false}catch(error){alert(error.message||"Không đọc được ảnh")}}
+function readDrugImage(input){acceptImage(input,"f_image","f_image_preview")}function readLibraryImage(input){acceptImage(input,"l_image","l_image_preview")}
+function clearDrugImage(){f_image.value="";f_image_preview.src="";f_image_preview.hidden=true}function clearLibraryImage(){l_image.value="";l_image_preview.src="";l_image_preview.hidden=true}
+function openLibraryAdd(){editingLibrary=null;document.getElementById("libraryDlgTitle").textContent="Thêm thuốc vào thư viện";l_name.value="";l_image.value="";l_image_preview.src="";l_image_preview.hidden=true;l_use.value="";l_dose.value="";libraryDlg.showModal()}
+function openLibraryEdit(id){const x=library.find(a=>a.id===id);if(!x)return;editingLibrary=id;document.getElementById("libraryDlgTitle").textContent="Sửa thuốc trong thư viện";l_name.value=x.name||"";l_image.value=x.image||"";l_image_preview.src=safeImageSrc(x.image);l_image_preview.hidden=!l_image_preview.src;l_use.value=x.use||"";l_dose.value=x.dose||"";libraryDlg.showModal()}
+async function saveLibraryEntry(e){e.preventDefault();const previous=library.find(a=>a.id===editingLibrary)||{};const x={...previous,id:editingLibrary||uid(),name:l_name.value.trim(),image:l_image.value,use:l_use.value.trim(),dose:l_dose.value.trim()};if(editingLibrary)library=library.map(a=>a.id===editingLibrary?x:a);else library.unshift(x);localStorage.setItem(LIBRARY_KEY,JSON.stringify(library));libraryDlg.close();renderLibrary();await saveLibraryRemote(x)}
+async function saveLibraryRemote(entry){if(!API_URL||!cloudReady)return;try{const r=await fetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"upsertLibrary",entry})});const out=await r.json();if(!r.ok||!out.ok)throw new Error(out.error||"Không lưu được thư viện");setSyncStatus("Đã lưu thư viện lên Google Sheets")}catch(error){console.warn(error);setSyncStatus("Chưa đồng bộ thư viện — dữ liệu còn trên thiết bị này")}}
+async function removeLibraryEntry(id){if(!confirm("Xóa hẳn thuốc này khỏi thư viện trên Google Sheets? Không thể khôi phục sau khi xóa."))return;if(API_URL&&!cloudReady){alert("Chưa kết nối Google Sheets nên chưa thể xóa vĩnh viễn. Hãy kết nối rồi thử lại.");return}if(API_URL){try{const r=await fetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"deleteLibrary",id})});const out=await r.json();if(!r.ok||!out.ok)throw new Error(out.error||"Không xóa được")}catch(error){alert("Chưa xóa được trên Google Sheets. Thuốc vẫn còn trong thư viện.");console.warn(error);return}}library=library.filter(x=>x.id!==id);localStorage.setItem(LIBRARY_KEY,JSON.stringify(library));renderLibrary()}
+function openLibraryPicker(){document.getElementById("pickerSearch").value="";renderLibraryPicker();pickerDlg.showModal()}
+function renderLibraryPicker(){const q=(pickerSearch.value||"").trim().toLocaleLowerCase("vi");const entries=library.filter(x=>(x.name||"").toLocaleLowerCase("vi").includes(q));pickerList.innerHTML=entries.length?entries.map(x=>`<button class="card" type="button" style="width:100%;text-align:left;cursor:pointer" onclick="addFromLibrary('${esc(x.id)}')">${esc(x.name)}</button>`).join(""):'<div class="empty">Không có thuốc phù hợp trong thư viện.</div>'}
+function addFromLibrary(id){const x=library.find(a=>a.id===id);if(!x)return;selectedLibraryId=x.id;f_name.value=x.name||"";f_use.value=x.use||"";f_dose.value=x.dose||"";f_image.value=x.image||"";f_image_preview.src=safeImageSrc(x.image);f_image_preview.hidden=!f_image_preview.src;if(document.getElementById("pickerDlg").open)pickerDlg.close();if(!document.getElementById("dlg").open){document.getElementById("dlgTitle").textContent="Thêm từ thư viện";f_qty.value=0;f_unit.value="";f_expiry.value="";f_min.value=3;f_note.value="";dlg.showModal()}else document.getElementById("f_qty").focus()}
+function openAdd(){editing=null;selectedLibraryId=null;document.getElementById("dlgTitle").textContent="Thêm thuốc";document.querySelectorAll("#dlg input:not([type=file]),#dlg textarea").forEach(e=>e.value="");f_image_preview.src="";f_image_preview.hidden=true;document.getElementById("f_qty").value=0;document.getElementById("f_min").value=3;dlg.showModal()}
+function openEdit(id){const x=drugs.find(a=>a.id===id);if(!x)return;editing=id;selectedLibraryId=x.libraryId||null;document.getElementById("dlgTitle").textContent="Sửa thuốc";f_name.value=x.name;f_qty.value=x.qty;f_unit.value=x.unit||"";f_expiry.value=x.expiry||"";f_min.value=x.minQty??3;f_use.value=x.use||"";f_dose.value=x.dose||"";f_image.value=x.image||"";f_image_preview.src=safeImageSrc(x.image);f_image_preview.hidden=!f_image_preview.src;f_note.value=x.note||"";dlg.showModal()}
+async function saveDrug(e){e.preventDefault();const old=drugs.find(a=>a.id===editing)||{};const x={...old,id:editing||uid(),libraryId:selectedLibraryId||old.libraryId||uid(),name:f_name.value.trim(),qty:+f_qty.value,unit:f_unit.value.trim(),expiry:f_expiry.value,minQty:+f_min.value,use:f_use.value.trim(),dose:f_dose.value.trim(),image:f_image.value,note:f_note.value.trim()};const entry={id:x.libraryId,name:x.name,use:x.use,dose:x.dose,image:x.image};const libraryIndex=library.findIndex(a=>a.id===entry.id);if(libraryIndex>=0)library[libraryIndex]={...library[libraryIndex],...entry};else library.unshift(entry);localStorage.setItem(LIBRARY_KEY,JSON.stringify(library));if(editing)drugs=drugs.map(a=>a.id===editing?x:a);else drugs.unshift(x);persist();dlg.close();render();renderLibrary();await Promise.all([pushAll(),saveLibraryRemote(entry)])}
 function changeQty(id,n){const x=drugs.find(a=>a.id===id);if(!x)return;x.qty=Math.max(0,+x.qty+n);persist();render();pushAll()}
-function removeDrug(id){if(confirm("Xóa thuốc này khỏi danh sách?")){drugs=drugs.filter(x=>x.id!==id);persist();render();pushAll()}}
+async function removeDrug(id){const x=drugs.find(a=>a.id===id);if(!x||!confirm("Xóa khỏi tủ thuốc? Thông tin sẽ được giữ trong thư viện để bạn thêm lại sau."))return;const entry={id:x.libraryId||uid(),name:x.name,image:x.image||"",use:x.use||"",dose:x.dose||""};const index=library.findIndex(a=>a.id===entry.id);if(index>=0)library[index]={...library[index],...entry};else library.unshift(entry);localStorage.setItem(LIBRARY_KEY,JSON.stringify(library));await saveLibraryRemote(entry);drugs=drugs.filter(a=>a.id!==id);persist();render();renderLibrary();pushAll()}
 async function pushAll(){
   if(!API_URL){setSyncStatus("Chưa cấu hình đồng bộ Sheets");return}
   if(!cloudReady){setSyncStatus("Đang tải dữ liệu… thử lại sau giây lát");return}
+  if(keepLocalWithoutCloud){setSyncStatus("Google Sheets đang trống — giữ dữ liệu trên thiết bị, không tải lên tự động");return}
   const snapshot=JSON.stringify(drugs);
   saveQueue=saveQueue.then(async()=>{
     setSyncStatus("Đang lưu lên Google Sheets…");
@@ -137,16 +180,16 @@ async function pushAll(){
 }
 async function syncNow(){
   if(!API_URL){setSyncStatus("Chưa cấu hình đồng bộ Sheets");return}
-  if(!cloudReady){setSyncStatus("Đang tải dữ liệu… thử lại sau giây lát");return}
   try{
     setSyncStatus("Đang tải dữ liệu từ Google Sheets…");
     const r=await fetch(API_URL,{cache:"no-store"});
     if(!r.ok)throw new Error("HTTP "+r.status);
     const result=await r.json();
     if(!result.ok||!Array.isArray(result.drugs))throw new Error("Phản hồi API không hợp lệ");
-    if(result.drugs.length){drugs=result.drugs;persist();render();setSyncStatus("Đã tải dữ liệu từ Google Sheets")}
-    else if(drugs.length)await pushAll();
-    else setSyncStatus("Google Sheets đang trống");
+    cloudReady=true;await mergeCloudLibrary(result.library,result.deletedLibraryIds);
+    if(result.drugs.length){drugs=result.drugs;persist();render();cloudHasData=true;keepLocalWithoutCloud=false;setSyncStatus("Đã tải dữ liệu từ Google Sheets")}
+    else if(drugs.length){cloudReady=true;cloudHasData=false;keepLocalWithoutCloud=true;setSyncStatus("Google Sheets đang trống — giữ dữ liệu trên thiết bị, không tải lên tự động")}
+    else{cloudReady=true;cloudHasData=false;keepLocalWithoutCloud=false;setSyncStatus("Google Sheets đang trống")}
   }catch(e){console.warn("Không đồng bộ được:",e);setSyncStatus("Lỗi đồng bộ — dữ liệu vẫn lưu trên thiết bị này")}
 }
 async function initCloud(){
@@ -158,13 +201,12 @@ async function initCloud(){
     if(!r.ok)throw new Error("HTTP "+r.status);
     const result=await r.json();
     if(!result.ok||!Array.isArray(result.drugs))throw new Error("Phản hồi API không hợp lệ");
-    if(result.drugs.length){drugs=result.drugs;persist();render();setSyncStatus("Đã tải dữ liệu từ Google Sheets")}
-    else if(drugs.length){setSyncStatus("Đang đưa dữ liệu trên thiết bị này lên Sheet lần đầu…")}
-    cloudReady=true;
-    if(!result.drugs.length&&drugs.length)await syncNow();
-    else if(!result.drugs.length)setSyncStatus("Google Sheets đang trống; sẵn sàng đồng bộ")
+    cloudReady=true;await mergeCloudLibrary(result.library,result.deletedLibraryIds);
+    if(result.drugs.length){drugs=result.drugs;persist();render();cloudHasData=true;keepLocalWithoutCloud=false;setSyncStatus("Đã tải dữ liệu từ Google Sheets")}
+    else{cloudHasData=false;keepLocalWithoutCloud=drugs.length>0;setSyncStatus(drugs.length?"Google Sheets đang trống — giữ dữ liệu trên thiết bị, không tải lên tự động":"Google Sheets đang trống")}
   }catch(e){console.warn("Không tải được dữ liệu Google Sheets:",e);cloudReady=false;setSyncStatus("Không kết nối được Sheets — kiểm tra URL và quyền triển khai")}
 }
+async function mergeCloudLibrary(remote,deletedIds=[]){if(!Array.isArray(remote))return;const remoteIds=new Set(remote.map(x=>String(x.id))),deleted=new Set((deletedIds||[]).map(String));const pending=library.filter(x=>!remoteIds.has(String(x.id))&&!deleted.has(String(x.id)));library=[...remote,...pending];localStorage.setItem(LIBRARY_KEY,JSON.stringify(library));if(pending.length)await Promise.all(pending.map(saveLibraryRemote));renderLibrary()}
 initCloud();
 </script>
 </body>

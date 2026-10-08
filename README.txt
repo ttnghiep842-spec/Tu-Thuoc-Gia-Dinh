@@ -38,10 +38,11 @@ Trang web tĩnh được host bằng GitHub Pages. Danh sách thuốc có bản 
 ## Đồng bộ hoạt động thế nào
 
 - Khi mở trang, app tải danh sách từ Google Sheets.
-- Nếu Sheet chưa có thuốc nhưng trình duyệt này đã có dữ liệu cũ, app đưa dữ liệu cũ lên Sheet lần đầu.
-- Nếu Sheet đã có dữ liệu, dữ liệu Sheet được dùng và lưu lại vào trình duyệt.
-- Khi thêm, sửa, tăng/giảm số lượng hoặc xóa thuốc, app gửi toàn bộ danh sách lên Sheet.
-- Nút **Đồng bộ** tải lại dữ liệu từ Sheet khi mở trang; sau khi tải xong, nếu Sheet rỗng và trình duyệt có dữ liệu thì app khởi tạo Sheet từ dữ liệu đó.
+- Nếu Sheet có dữ liệu, dữ liệu Sheet được dùng và lưu lại vào trình duyệt, thay thế bản lưu cục bộ cũ.
+- Nếu Sheet trống nhưng trình duyệt đang có dữ liệu cũ, app giữ dữ liệu cục bộ và không tự ghi đè Sheet; kiểm tra `SHEET_ID` và tab `THUOC` trong Apps Script.
+- Nếu cả Sheet và trình duyệt đều trống, thuốc mới thêm sẽ được lưu lên Sheet như bình thường.
+- Khi thêm, sửa, tăng/giảm số lượng hoặc xóa thuốc, app cập nhật danh sách `THUOC`; metadata thuốc được thêm/cập nhật trong `THUOC_THU_VIEN`.
+- Nút **Đồng bộ** tải lại dữ liệu từ Sheet. Nếu Sheet trống nhưng máy đang có bản cũ, app sẽ giữ bản cục bộ và không tự tải nó lên Sheet.
 - Thiết bị khác chỉ cần mở cùng URL GitHub Pages để lấy cùng dữ liệu. Kết nối internet cần thiết để đọc/ghi Sheet.
 
 ## Lưu ý quan trọng
@@ -50,13 +51,18 @@ Trang web tĩnh được host bằng GitHub Pages. Danh sách thuốc có bản 
 - Mỗi lần cập nhật ghi đè toàn bộ danh sách. Tránh sửa danh sách đồng thời trên nhiều thiết bị; lần ghi sau có thể ghi đè thay đổi vừa thực hiện trên thiết bị kia.
 - Quyền `Anyone` làm URL Apps Script có thể được gọi bởi người biết URL. Không lưu dữ liệu nhạy cảm hoặc thông tin định danh cá nhân trong bảng.
 - Google Sheets/Apps Script dùng hạn mức theo tài khoản Google; phù hợp ứng dụng gia đình với tần suất thấp, không phải hệ thống nhiều người dùng.
-- Apps Script tạo tab `THUOC` tự động. Bản hiện tại không sử dụng tab `LICH_SU`.
+- Apps Script tự tạo hai tab `THUOC` (tồn kho) và `THUOC_THU_VIEN` (danh mục lưu lại). Khi cập nhật `apps_script.gs`, hãy cập nhật phiên bản Web App hiện có: **Deploy > Manage deployments > Edit > New version > Deploy**. Giữ nguyên URL `/exec` đang cấu hình trong trang.
 
 ## Tính năng hiện có
 
 - Thêm/sửa/xóa thuốc, thay đổi số lượng, HSD, mức tồn tối thiểu.
+- Thư viện thuốc nhập thủ công tiếng Việt, có nút chụp ảnh và tải ảnh từ thiết bị; ảnh được nén để lưu cùng metadata trong Google Sheets.
+- Thuốc mới trong tủ được thêm vào `THUOC_THU_VIEN`; xóa khỏi tủ sẽ giữ thông tin trong thư viện để thêm lại nhanh. Nút **Thêm vào tủ** tạo mục tồn kho mới từ thư viện.
+- **Xóa hẳn** trong thư viện xóa dòng đó vĩnh viễn khỏi tab `THUOC_THU_VIEN`.
 - Tìm kiếm và cảnh báo.
-- Lưu local trên trình duyệt và đồng bộ một danh sách qua Google Sheets.
+- Lưu local trên trình duyệt và đồng bộ tồn kho cùng thư viện qua Google Sheets.
 - PWA manifest.
+
+Thư viện được lưu cục bộ để dùng khi mất mạng và đồng bộ qua Google Sheets khi kết nối. Ảnh được thu nhỏ/nén trước khi lưu để vừa giới hạn ô của Google Sheets. Hãy sao lưu Sheet trước khi xóa thuốc khỏi thư viện; thao tác này không thể hoàn tác.
 
 Lưu ý y tế: ứng dụng chỉ quản lý tủ thuốc. Không dùng dữ liệu trong app để tự chẩn đoán hoặc thay thế hướng dẫn của bác sĩ/dược sĩ.
