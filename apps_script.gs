@@ -12,7 +12,7 @@ TỦ THUỐC GIA ĐÌNH - Google Apps Script
 Sheet sẽ tự tạo 2 trang:
 THUOC và THUOC_THU_VIEN
 */
-const SHEET_ID = "1Ua_U1vrazAWs02pnfVX2ilP2v6-RrohJh6kPwA4LLLo";
+const SHEET_ID = "ID_SHEETS";
 
 function getSheet_(name, headers) {
   const ss = SpreadsheetApp.openById(SHEET_ID);
