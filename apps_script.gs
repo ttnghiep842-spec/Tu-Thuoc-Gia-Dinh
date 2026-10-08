@@ -12,7 +12,7 @@ TỦ THUỐC GIA ĐÌNH - Google Apps Script
 Sheet sẽ tự tạo 2 trang:
 THUOC và THUOC_THU_VIEN
 */
-const SHEET_ID = "DAN_ID_GOOGLE_SHEET_VAO_DAY";
+const SHEET_ID = "1Ua_U1vrazAWs02pnfVX2ilP2v6-RrohJh6kPwA4LLLo";
 
 function getSheet_(name, headers) {
   const ss = SpreadsheetApp.openById(SHEET_ID);
@@ -22,7 +22,112 @@ function getSheet_(name, headers) {
   return sh;
 }
 
-function doGet() {
+// Run once from the Apps Script editor as the owner. Copy the logged secret
+// into Google Authenticator using manual setup. Never put this secret in index.html.
+function setupAuthenticator() {
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty("TOTP_SECRET")) throw new Error("Authenticator is already configured. Use resetAuthenticator only if replacing the host device.");
+  const raw = (Utilities.getUuid().replace(/-/g, "") + Utilities.getUuid().replace(/-/g, "")).slice(0, 40);
+  const secret = hexToBase32_(raw);
+  props.setProperty("TOTP_SECRET", secret);
+  Logger.log("Add a time-based 6-digit code in Google Authenticator with this setup key: " + secret);
+  Logger.log("Issuer: Tu Thuoc Gia Dinh; period: 30 seconds.");
+}
+
+function resetAuthenticator() {
+  const props = PropertiesService.getScriptProperties();
+  const raw = (Utilities.getUuid().replace(/-/g, "") + Utilities.getUuid().replace(/-/g, "")).slice(0, 40);
+  const secret = hexToBase32_(raw);
+  props.setProperty("TOTP_SECRET", secret);
+  props.deleteProperty("TOTP_LAST_STEP");
+  props.deleteProperty("AUTH_FAIL_STEP");
+  props.deleteProperty("AUTH_FAIL_COUNT");
+  Logger.log("Authenticator seed replaced. Add this new setup key in Google Authenticator: " + secret);
+  Logger.log("All existing device tokens remain valid.");
+}
+
+function revokeAllDevices() {
+  const props = PropertiesService.getScriptProperties();
+  Object.keys(props.getProperties()).filter(k => k.indexOf("DEVICE_") === 0).forEach(k => props.deleteProperty(k));
+}
+
+function hexToBase32_(hex) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const bytes = hex.match(/.{2}/g).map(x => parseInt(x, 16));
+  let output = "", buffer = 0, bits = 0;
+  bytes.forEach(byte => {
+    buffer = (buffer << 8) | byte; bits += 8;
+    while (bits >= 5) { bits -= 5; output += alphabet[(buffer >> bits) & 31]; buffer &= (1 << bits) - 1; }
+  });
+  if (bits) output += alphabet[(buffer << (5 - bits)) & 31];
+  return output;
+}
+
+function base32ToBytes_(secret) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const bytes = []; let buffer = 0, bits = 0;
+  String(secret).replace(/=+$/, "").toUpperCase().replace(/[^A-Z2-7]/g, "").split("").forEach(ch => {
+    buffer = (buffer << 5) | alphabet.indexOf(ch); bits += 5;
+    if (bits >= 8) { bits -= 8; bytes.push((buffer >> bits) & 255); buffer &= (1 << bits) - 1; }
+  });
+  return bytes;
+}
+
+function totpForStep_(secret, step) {
+  let counter = step; const message = new Array(8).fill(0);
+  for (let i = 7; i >= 0; i--) { message[i] = counter & 255; counter = Math.floor(counter / 256); }
+  const hmac = Utilities.computeHmacSha1Signature(message, base32ToBytes_(secret));
+  const offset = hmac[hmac.length - 1] & 15;
+  const binary = ((hmac[offset] & 127) << 24) | ((hmac[offset + 1] & 255) << 16) | ((hmac[offset + 2] & 255) << 8) | (hmac[offset + 3] & 255);
+  return String(binary % 1000000).padStart(6, "0");
+}
+
+function hashToken_(value) {
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(value), Utilities.Charset.UTF_8)
+    .map(b => (b < 0 ? b + 256 : b).toString(16).padStart(2, "0")).join("");
+}
+
+function activateDevice_(code) {
+  const lock = LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const secret = props.getProperty("TOTP_SECRET");
+    if (!secret) return json_({ok:false,error:"Authenticator has not been configured by the owner."});
+    const now = Math.floor(Date.now() / 30000);
+    const failStep = Number(props.getProperty("AUTH_FAIL_STEP") || -1);
+    let failures = failStep === now ? Number(props.getProperty("AUTH_FAIL_COUNT") || 0) : 0;
+    const retryAfter = 30 - Math.floor((Date.now() % 30000) / 1000);
+    if (failures >= 3) return json_({ok:false,error:"Three incorrect attempts. Wait for the next Authenticator code.",retryAfter});
+    const candidate = String(code || "").trim();
+    const lastAccepted = Number(props.getProperty("TOTP_LAST_STEP") || -1);
+    let acceptedStep = null;
+    if (/^\d{6}$/.test(candidate)) {
+      for (let offset = -1; offset <= 1; offset++) {
+        const step = now + offset;
+        if (step > lastAccepted && totpForStep_(secret, step) === candidate) acceptedStep = step;
+      }
+    }
+    if (acceptedStep === null) {
+      failures++;
+      props.setProperty("AUTH_FAIL_STEP", String(now));
+      props.setProperty("AUTH_FAIL_COUNT", String(failures));
+      return json_({ok:false,error:failures >= 3 ? "Three incorrect attempts. Wait for the next Authenticator code." : "Incorrect or already used code.",attemptsRemaining:Math.max(0,3-failures),retryAfter:failures >= 3 ? retryAfter : 0});
+    }
+    props.setProperty("TOTP_LAST_STEP", String(acceptedStep));
+    props.deleteProperty("AUTH_FAIL_STEP"); props.deleteProperty("AUTH_FAIL_COUNT");
+    const token = Utilities.getUuid().replace(/-/g, "") + Utilities.getUuid().replace(/-/g, "");
+    props.setProperty("DEVICE_" + hashToken_(token), "1");
+    return json_({ok:true,deviceToken:token});
+  } finally { lock.releaseLock(); }
+}
+
+function deviceAuthorized_(token) {
+  if (!token || String(token).length < 40) return false;
+  return PropertiesService.getScriptProperties().getProperty("DEVICE_" + hashToken_(token)) === "1";
+}
+
+function doGet(e) {
+  if (!deviceAuthorized_(e && e.parameter && e.parameter.deviceToken)) return json_({ok:false,error:"Device activation required."});
   const sh = getSheet_("THUOC", ["ID","Tên thuốc","Số lượng","Đơn vị","Hạn sử dụng","Mức tối thiểu","Công dụng","Cách dùng","Ghi chú","Ảnh","ID thư viện"]);
   sh.getRange(1,10,1,2).setValues([["Ảnh","ID thư viện"]]);
   const values = sh.getDataRange().getValues();
@@ -47,6 +152,8 @@ function doPost(e) {
   let body;
   try { body = JSON.parse(e.postData.contents || "{}"); }
   catch (err) { return json_({ok:false,error:"Invalid JSON"}); }
+  if (body.action === "activateDevice") return activateDevice_(body.code);
+  if (!deviceAuthorized_(body.deviceToken)) return json_({ok:false,error:"Device activation required."});
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {

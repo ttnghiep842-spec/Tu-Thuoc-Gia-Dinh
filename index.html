@@ -30,13 +30,15 @@ dialog{border:0;border-radius:16px;width:min(560px,calc(100% - 24px));padding:0;
 .sync-status{font-size:12px;color:var(--muted);align-self:center}
 .tabs{display:flex;gap:8px;margin:0 0 12px}.tab{border:1px solid var(--border);background:#fff;color:var(--text);border-radius:999px;padding:9px 14px;font-weight:650;cursor:pointer}.tab.active{background:var(--primary);color:#fff;border-color:var(--primary)}
 .drug-image{width:76px;height:76px;object-fit:cover;border-radius:12px;border:1px solid var(--border);background:#f3f6f5;flex:none}.library-card{display:flex;gap:12px}.library-info{min-width:0;flex:1}.image-preview{display:block;max-width:180px;max-height:140px;object-fit:contain;border-radius:10px;margin-top:8px}.btn:disabled{opacity:.55;cursor:wait}
+.auth-gate{min-height:100vh;display:grid;place-items:center;padding:20px}.auth-card{width:min(420px,100%);background:#fff;border:1px solid var(--border);border-radius:16px;padding:24px;box-shadow:0 12px 32px #00000010}.auth-card h1{font-size:21px;margin:0 0 8px}.auth-card p{font-size:14px;color:var(--muted);line-height:1.5}.auth-card input{text-align:center;font-size:22px;letter-spacing:.35em;margin:12px 0}.auth-status{font-size:13px;color:var(--muted);min-height:20px}
 @media(max-width:800px){.stats{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:650px){.grid{grid-template-columns:1fr}.field.full{grid-column:auto}.row{align-items:flex-start}}
 </style>
 </head>
 <body>
-<header><h1>💊 Tủ thuốc gia đình</h1><p>Quản lý số lượng, hạn sử dụng và danh sách cần mua</p></header>
-<main>
+<section id="activationGate" class="auth-gate"><div class="auth-card"><h1>🔐 Xác nhận thiết bị</h1><p>Nhập mã Google Authenticator của chủ tủ thuốc. Thiết bị này chỉ cần xác nhận một lần.</p><form onsubmit="activateDevice(event)"><input id="activationCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="000000" required><button id="activationButton" class="btn" type="submit" style="width:100%">Xác nhận</button></form><div id="activationStatus" class="auth-status" role="status" aria-live="polite"></div></div></section>
+<header id="appHeader" hidden><h1>💊 Tủ thuốc gia đình</h1><p>Quản lý số lượng, hạn sử dụng và danh sách cần mua</p></header>
+<main id="appMain" hidden>
   <div id="cabinetToolbar" class="toolbar">
     <input id="search" class="search" placeholder="🔎 Tìm tên thuốc..." oninput="render()">
     <button class="btn" onclick="openAdd()">＋ Thêm thuốc</button>
@@ -91,6 +93,8 @@ dialog{border:0;border-radius:16px;width:min(560px,calc(100% - 24px));padding:0;
 const KEY="family_medicine_v1";
 const LIBRARY_KEY="family_medicine_library_v1";
 const API_URL="https://script.google.com/macros/s/AKfycbxRvYeBDShVGNq4Kd0th4M-FAakYhs-WW_Y-Ik_9IQan8rzWjjS-ncOUnCVxgapyBS8/exec"; // Dán URL Web App /exec của Google Apps Script vào đây.
+const DEVICE_TOKEN_KEY="family_medicine_device_token_v1";
+let deviceToken=localStorage.getItem(DEVICE_TOKEN_KEY)||"";
 let drugs=JSON.parse(localStorage.getItem(KEY)||"[]");
 let library=JSON.parse(localStorage.getItem(LIBRARY_KEY)||"[]");
 let editing=null;
@@ -103,6 +107,10 @@ let saveQueue=Promise.resolve();
 
 function persist(){localStorage.setItem(KEY,JSON.stringify(drugs))}
 function setSyncStatus(message){document.getElementById("syncStatus").textContent=message}
+function showActivation(message=""){document.getElementById("activationGate").hidden=false;document.getElementById("appHeader").hidden=true;document.getElementById("appMain").hidden=true;document.getElementById("activationStatus").textContent=message}
+function showApp(){document.getElementById("activationGate").hidden=true;document.getElementById("appHeader").hidden=false;document.getElementById("appMain").hidden=false}
+async function authFetch(url,options={}){if(!deviceToken)throw new Error("Thiết bị chưa được xác nhận");const target=new URL(url);const opts={...options};if((opts.method||"GET").toUpperCase()==="GET"){target.searchParams.set("deviceToken",deviceToken)}else{const body=JSON.parse(opts.body||"{}");body.deviceToken=deviceToken;opts.body=JSON.stringify(body)}return fetch(target.toString(),opts)}
+async function activateDevice(event){event.preventDefault();const button=document.getElementById("activationButton"),status=document.getElementById("activationStatus"),code=document.getElementById("activationCode").value.trim();let locked=false;button.disabled=true;status.textContent="Đang xác nhận mã…";try{const response=await fetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"activateDevice",code})});const result=await response.json();if(!result.ok){status.textContent=result.error||"Mã không hợp lệ.";if(result.retryAfter){locked=true;let remaining=result.retryAfter;status.textContent=`Đã khóa đến khi mã mới xuất hiện (${remaining} giây).`;const timer=setInterval(()=>{remaining--;if(remaining<=0){clearInterval(timer);button.disabled=false;status.textContent="Mã mới đã sẵn sàng. Hãy nhập mã hiện tại."}else status.textContent=`Đã khóa đến khi mã mới xuất hiện (${remaining} giây).`},1000);return}return}deviceToken=result.deviceToken;localStorage.setItem(DEVICE_TOKEN_KEY,deviceToken);document.getElementById("activationCode").value="";await initCloud()}catch(error){status.textContent="Không kết nối được. Kiểm tra mạng hoặc cấu hình Apps Script.";console.warn(error)}finally{if(!deviceToken&&!locked)button.disabled=false}}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
 function daysTo(d){if(!d)return Infinity;return Math.ceil((new Date(d+"T23:59:59")-new Date())/86400000)}
 function status(x){
@@ -153,8 +161,8 @@ function clearDrugImage(){f_image.value="";f_image_preview.src="";f_image_previe
 function openLibraryAdd(){editingLibrary=null;document.getElementById("libraryDlgTitle").textContent="Thêm thuốc vào thư viện";l_name.value="";l_image.value="";l_image_preview.src="";l_image_preview.hidden=true;l_use.value="";l_dose.value="";libraryDlg.showModal()}
 function openLibraryEdit(id){const x=library.find(a=>a.id===id);if(!x)return;editingLibrary=id;document.getElementById("libraryDlgTitle").textContent="Sửa thuốc trong thư viện";l_name.value=x.name||"";l_image.value=x.image||"";l_image_preview.src=safeImageSrc(x.image);l_image_preview.hidden=!l_image_preview.src;l_use.value=x.use||"";l_dose.value=x.dose||"";libraryDlg.showModal()}
 async function saveLibraryEntry(e){e.preventDefault();const previous=library.find(a=>a.id===editingLibrary)||{};const x={...previous,id:editingLibrary||uid(),name:l_name.value.trim(),image:l_image.value,use:l_use.value.trim(),dose:l_dose.value.trim()};if(editingLibrary)library=library.map(a=>a.id===editingLibrary?x:a);else library.unshift(x);localStorage.setItem(LIBRARY_KEY,JSON.stringify(library));libraryDlg.close();renderLibrary();await saveLibraryRemote(x)}
-async function saveLibraryRemote(entry){if(!API_URL||!cloudReady)return;try{const r=await fetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"upsertLibrary",entry})});const out=await r.json();if(!r.ok||!out.ok)throw new Error(out.error||"Không lưu được thư viện");setSyncStatus("Đã lưu thư viện lên Google Sheets")}catch(error){console.warn(error);setSyncStatus("Chưa đồng bộ thư viện — dữ liệu còn trên thiết bị này")}}
-async function removeLibraryEntry(id){if(!confirm("Xóa hẳn thuốc này khỏi thư viện trên Google Sheets? Không thể khôi phục sau khi xóa."))return;if(API_URL&&!cloudReady){alert("Chưa kết nối Google Sheets nên chưa thể xóa vĩnh viễn. Hãy kết nối rồi thử lại.");return}if(API_URL){try{const r=await fetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"deleteLibrary",id})});const out=await r.json();if(!r.ok||!out.ok)throw new Error(out.error||"Không xóa được")}catch(error){alert("Chưa xóa được trên Google Sheets. Thuốc vẫn còn trong thư viện.");console.warn(error);return}}library=library.filter(x=>x.id!==id);localStorage.setItem(LIBRARY_KEY,JSON.stringify(library));renderLibrary()}
+async function saveLibraryRemote(entry){if(!API_URL||!cloudReady)return;try{const r=await authFetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"upsertLibrary",entry})});const out=await r.json();if(!r.ok||!out.ok)throw new Error(out.error||"Không lưu được thư viện");setSyncStatus("Đã lưu thư viện lên Google Sheets")}catch(error){console.warn(error);setSyncStatus("Chưa đồng bộ thư viện — dữ liệu còn trên thiết bị này")}}
+async function removeLibraryEntry(id){if(!confirm("Xóa hẳn thuốc này khỏi thư viện trên Google Sheets? Không thể khôi phục sau khi xóa."))return;if(API_URL&&!cloudReady){alert("Chưa kết nối Google Sheets nên chưa thể xóa vĩnh viễn. Hãy kết nối rồi thử lại.");return}if(API_URL){try{const r=await authFetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"deleteLibrary",id})});const out=await r.json();if(!r.ok||!out.ok)throw new Error(out.error||"Không xóa được")}catch(error){alert("Chưa xóa được trên Google Sheets. Thuốc vẫn còn trong thư viện.");console.warn(error);return}}library=library.filter(x=>x.id!==id);localStorage.setItem(LIBRARY_KEY,JSON.stringify(library));renderLibrary()}
 function openLibraryPicker(){document.getElementById("pickerSearch").value="";renderLibraryPicker();pickerDlg.showModal()}
 function renderLibraryPicker(){const q=(pickerSearch.value||"").trim().toLocaleLowerCase("vi");const entries=library.filter(x=>(x.name||"").toLocaleLowerCase("vi").includes(q));pickerList.innerHTML=entries.length?entries.map(x=>`<button class="card" type="button" style="width:100%;text-align:left;cursor:pointer" onclick="addFromLibrary('${esc(x.id)}')">${esc(x.name)}</button>`).join(""):'<div class="empty">Không có thuốc phù hợp trong thư viện.</div>'}
 function addFromLibrary(id){const x=library.find(a=>a.id===id);if(!x)return;selectedLibraryId=x.id;f_name.value=x.name||"";f_use.value=x.use||"";f_dose.value=x.dose||"";f_image.value=x.image||"";f_image_preview.src=safeImageSrc(x.image);f_image_preview.hidden=!f_image_preview.src;if(document.getElementById("pickerDlg").open)pickerDlg.close();if(!document.getElementById("dlg").open){document.getElementById("dlgTitle").textContent="Thêm từ thư viện";f_qty.value=0;f_unit.value="";f_expiry.value="";f_min.value=3;f_note.value="";dlg.showModal()}else document.getElementById("f_qty").focus()}
@@ -170,7 +178,7 @@ async function pushAll(){
   const snapshot=JSON.stringify(drugs);
   saveQueue=saveQueue.then(async()=>{
     setSyncStatus("Đang lưu lên Google Sheets…");
-    const r=await fetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"replaceAll",drugs:JSON.parse(snapshot)})});
+    const r=await authFetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"replaceAll",drugs:JSON.parse(snapshot)})});
     if(!r.ok)throw new Error("HTTP "+r.status);
     const result=await r.json();
     if(!result.ok)throw new Error(result.error||"Không lưu được");
@@ -182,7 +190,7 @@ async function syncNow(){
   if(!API_URL){setSyncStatus("Chưa cấu hình đồng bộ Sheets");return}
   try{
     setSyncStatus("Đang tải dữ liệu từ Google Sheets…");
-    const r=await fetch(API_URL,{cache:"no-store"});
+    const r=await authFetch(API_URL,{cache:"no-store"});
     if(!r.ok)throw new Error("HTTP "+r.status);
     const result=await r.json();
     if(!result.ok||!Array.isArray(result.drugs))throw new Error("Phản hồi API không hợp lệ");
@@ -197,17 +205,18 @@ async function initCloud(){
   if(!API_URL){cloudReady=true;setSyncStatus("Chưa cấu hình đồng bộ Sheets");return}
   try{
     setSyncStatus("Đang tải dữ liệu từ Google Sheets…");
-    const r=await fetch(API_URL,{cache:"no-store"});
+    const r=await authFetch(API_URL,{cache:"no-store"});
     if(!r.ok)throw new Error("HTTP "+r.status);
     const result=await r.json();
-    if(!result.ok||!Array.isArray(result.drugs))throw new Error("Phản hồi API không hợp lệ");
+    if(!result.ok||!Array.isArray(result.drugs))throw new Error(result.error||"Phản hồi API không hợp lệ");
     cloudReady=true;await mergeCloudLibrary(result.library,result.deletedLibraryIds);
+    showApp();
     if(result.drugs.length){drugs=result.drugs;persist();render();cloudHasData=true;keepLocalWithoutCloud=false;setSyncStatus("Đã tải dữ liệu từ Google Sheets")}
     else{cloudHasData=false;keepLocalWithoutCloud=drugs.length>0;setSyncStatus(drugs.length?"Google Sheets đang trống — giữ dữ liệu trên thiết bị, không tải lên tự động":"Google Sheets đang trống")}
-  }catch(e){console.warn("Không tải được dữ liệu Google Sheets:",e);cloudReady=false;setSyncStatus("Không kết nối được Sheets — kiểm tra URL và quyền triển khai")}
+  }catch(e){console.warn("Không tải được dữ liệu Google Sheets:",e);cloudReady=false;if(deviceToken){deviceToken="";localStorage.removeItem(DEVICE_TOKEN_KEY)}showActivation("Thiết bị chưa được kích hoạt hoặc khóa đã hết hiệu lực. Nhập mã mới để tiếp tục.")}
 }
 async function mergeCloudLibrary(remote,deletedIds=[]){if(!Array.isArray(remote))return;const remoteIds=new Set(remote.map(x=>String(x.id))),deleted=new Set((deletedIds||[]).map(String));const pending=library.filter(x=>!remoteIds.has(String(x.id))&&!deleted.has(String(x.id)));library=[...remote,...pending];localStorage.setItem(LIBRARY_KEY,JSON.stringify(library));if(pending.length)await Promise.all(pending.map(saveLibraryRemote));renderLibrary()}
-initCloud();
+if(deviceToken)initCloud();else showActivation();
 </script>
 </body>
 </html>

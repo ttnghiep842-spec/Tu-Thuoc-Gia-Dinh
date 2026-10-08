@@ -1,5 +1,3 @@
-ĐƯỢC CODE BẰNG CHATGPT 100%
-
 # TỦ THUỐC GIA ĐÌNH
 
 ## Mục tiêu
@@ -30,6 +28,17 @@ Trang web tĩnh được host bằng GitHub Pages. Danh sách thuốc có bản 
 5. Bấm **Deploy**, chấp thuận quyền truy cập Sheet khi Google hỏi.
 6. Sao chép URL Web App kết thúc bằng `/exec`. Không dùng URL thử nghiệm `/dev`.
 
+### 3a. Bật xác nhận bằng Google Authenticator
+
+1. Dán phiên bản mới của `apps_script.gs` vào Apps Script và lưu.
+2. Trong danh sách hàm, chọn `setupAuthenticator` rồi bấm **Run**.
+3. Mở **Execution log**, sao chép setup key được in ra và thêm vào Google Authenticator bằng **Enter a setup key**. Chọn loại mã theo thời gian (TOTP). Giữ setup key riêng tư; không đưa vào `index.html`.
+4. Cập nhật Web App hiện có bằng **Deploy > Manage deployments > Edit > New version > Deploy**. Giữ nguyên URL `/exec`, **Execute as: Me** và quyền truy cập hiện tại.
+5. Mở trang trên mỗi thiết bị và nhập mã 6 chữ số hiện tại một lần. Trình duyệt lưu khóa riêng thiết bị; xóa dữ liệu trình duyệt hoặc đổi thiết bị sẽ cần xác nhận lại.
+6. Sau 3 mã sai, chờ Authenticator tạo mã mới (khoảng 30 giây) rồi thử lại.
+
+Nếu thay điện thoại chủ, chạy `resetAuthenticator` trong Apps Script và thêm setup key mới vào Authenticator. Để thu hồi mọi thiết bị đã xác nhận, chạy `revokeAllDevices`.
+
 ### 4. Cấu hình trang web
 
 1. Mở `index.html`.
@@ -54,6 +63,7 @@ Trang web tĩnh được host bằng GitHub Pages. Danh sách thuốc có bản 
 - Quyền `Anyone` làm URL Apps Script có thể được gọi bởi người biết URL. Không lưu dữ liệu nhạy cảm hoặc thông tin định danh cá nhân trong bảng.
 - Google Sheets/Apps Script dùng hạn mức theo tài khoản Google; phù hợp ứng dụng gia đình với tần suất thấp, không phải hệ thống nhiều người dùng.
 - Apps Script tự tạo hai tab `THUOC` (tồn kho) và `THUOC_THU_VIEN` (danh mục lưu lại). Khi cập nhật `apps_script.gs`, hãy cập nhật phiên bản Web App hiện có: **Deploy > Manage deployments > Edit > New version > Deploy**. Giữ nguyên URL `/exec` đang cấu hình trong trang.
+- Mã Google Authenticator được kiểm tra ở Apps Script. Ba lần nhập sai sẽ khóa đến mã TOTP kế tiếp. Một mã hợp lệ chỉ dùng để kích hoạt một thiết bị; mỗi thiết bị được cấp khóa riêng.
 
 ## Tính năng hiện có
 
