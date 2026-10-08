@@ -36,7 +36,7 @@ dialog{border:0;border-radius:16px;width:min(560px,calc(100% - 24px));padding:0;
 </style>
 </head>
 <body>
-<section id="activationGate" class="auth-gate"><div class="auth-card"><h1>🔐 Xác nhận thiết bị</h1><p>Nhập mã Google Authenticator của chủ tủ thuốc. Thiết bị này chỉ cần xác nhận một lần.</p><form onsubmit="activateDevice(event)"><input id="activationCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="000000" required><button id="activationButton" class="btn" type="submit" style="width:100%">Xác nhận</button></form><div id="activationStatus" class="auth-status" role="status" aria-live="polite"></div></div></section>
+<section id="activationGate" class="auth-gate"><div class="auth-card"><h1>🔐 Kích hoạt thiết bị</h1><p>Nhập mã giới thiệu do chủ tủ thuốc cấp. Thiết bị này chỉ cần kích hoạt một lần.</p><form onsubmit="activateDevice(event)"><input id="activationCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="000000" required><button id="activationButton" class="btn" type="submit" style="width:100%">Kích hoạt</button></form><div id="activationStatus" class="auth-status" role="status" aria-live="polite"></div></div></section>
 <header id="appHeader" hidden><h1>💊 Tủ thuốc gia đình</h1><p>Quản lý số lượng, hạn sử dụng và danh sách cần mua</p></header>
 <main id="appMain" hidden>
   <div id="cabinetToolbar" class="toolbar">
@@ -92,8 +92,8 @@ dialog{border:0;border-radius:16px;width:min(560px,calc(100% - 24px));padding:0;
 <script>
 const KEY="family_medicine_v1";
 const LIBRARY_KEY="family_medicine_library_v1";
-const API_URL="https://script.google.com/macros/s/AKfycbxmVLwcglb_UlBNBOftzYfVVAWPvgQts4ZZdGfWgpAYX51Z0loMjX8vijDPvAS4FCy_/exec"; // Web App URL
-const DEVICE_TOKEN_KEY="family_medicine_device_token_v1";
+const API_URL="https://script.google.com/macros/s/AKfycbye8q2CCugTb9kml2tcFdTl5bi60MfBO_f-N0UDwLyJHLBek4BClVhhMi9Cs4F8HdrW/exec"; // Web App URL
+const DEVICE_TOKEN_KEY="family_medicine_device_token_v3";
 let deviceToken=localStorage.getItem(DEVICE_TOKEN_KEY)||"";
 let drugs=JSON.parse(localStorage.getItem(KEY)||"[]");
 let library=JSON.parse(localStorage.getItem(LIBRARY_KEY)||"[]");
@@ -110,7 +110,7 @@ function setSyncStatus(message){document.getElementById("syncStatus").textConten
 function showActivation(message=""){document.getElementById("activationGate").hidden=false;document.getElementById("appHeader").hidden=true;document.getElementById("appMain").hidden=true;document.getElementById("activationStatus").textContent=message}
 function showApp(){document.getElementById("activationGate").hidden=true;document.getElementById("appHeader").hidden=false;document.getElementById("appMain").hidden=false}
 async function authFetch(url,options={}){if(!deviceToken)throw new Error("Thiết bị chưa được xác nhận");const target=new URL(url);const opts={...options};if((opts.method||"GET").toUpperCase()==="GET"){target.searchParams.set("deviceToken",deviceToken)}else{const body=JSON.parse(opts.body||"{}");body.deviceToken=deviceToken;opts.body=JSON.stringify(body)}return fetch(target.toString(),opts)}
-async function activateDevice(event){event.preventDefault();const button=document.getElementById("activationButton"),status=document.getElementById("activationStatus"),code=document.getElementById("activationCode").value.trim();let locked=false;button.disabled=true;status.textContent="Đang xác nhận mã…";try{const response=await fetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"activateDevice",code})});const result=await response.json();if(!result.ok){status.textContent=result.error||"Mã không hợp lệ.";if(result.retryAfter){locked=true;let remaining=result.retryAfter;status.textContent=`Đã khóa đến khi mã mới xuất hiện (${remaining} giây).`;const timer=setInterval(()=>{remaining--;if(remaining<=0){clearInterval(timer);button.disabled=false;status.textContent="Mã mới đã sẵn sàng. Hãy nhập mã hiện tại."}else status.textContent=`Đã khóa đến khi mã mới xuất hiện (${remaining} giây).`},1000);return}return}deviceToken=result.deviceToken;localStorage.setItem(DEVICE_TOKEN_KEY,deviceToken);document.getElementById("activationCode").value="";await initCloud()}catch(error){status.textContent="Không kết nối được. Kiểm tra mạng hoặc cấu hình Apps Script.";console.warn(error)}finally{if(!deviceToken&&!locked)button.disabled=false}}
+async function activateDevice(event){event.preventDefault();const button=document.getElementById("activationButton"),status=document.getElementById("activationStatus"),code=document.getElementById("activationCode").value.trim();button.disabled=true;status.textContent="Đang kiểm tra mã giới thiệu…";try{const response=await fetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"activateDevice",code})});const result=await response.json();if(!result.ok){status.textContent=result.error||"Mã giới thiệu không đúng.";if(result.locked)button.disabled=true;return}deviceToken=result.deviceToken;localStorage.setItem(DEVICE_TOKEN_KEY,deviceToken);document.getElementById("activationCode").value="";await initCloud()}catch(error){status.textContent="Không kết nối được. Kiểm tra mạng hoặc cấu hình Apps Script.";console.warn(error)}finally{if(!deviceToken&&status.textContent.indexOf("khóa")<0)button.disabled=false}}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
 function daysTo(d){if(!d)return Infinity;return Math.ceil((new Date(d+"T23:59:59")-new Date())/86400000)}
 function status(x){

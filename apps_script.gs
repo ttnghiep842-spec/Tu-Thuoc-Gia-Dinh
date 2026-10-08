@@ -22,28 +22,24 @@ function getSheet_(name, headers) {
   return sh;
 }
 
-// Run once from the Apps Script editor as the owner. Copy the logged secret
-// into Google Authenticator using manual setup. Never put this secret in index.html.
-function setupAuthenticator() {
+// Run once from the Apps Script editor as the owner. Share the logged invite code
+// only with trusted family members. The server stores only its SHA-256 hash.
+function setupInviteCode() {
   const props = PropertiesService.getScriptProperties();
-  if (props.getProperty("TOTP_SECRET")) throw new Error("Authenticator is already configured. Use resetAuthenticator only if replacing the host device.");
-  const raw = (Utilities.getUuid().replace(/-/g, "") + Utilities.getUuid().replace(/-/g, "")).slice(0, 40);
-  const secret = hexToBase32_(raw);
-  props.setProperty("TOTP_SECRET", secret);
-  Logger.log("Add a time-based 6-digit code in Google Authenticator with this setup key: " + secret);
-  Logger.log("Issuer: Tu Thuoc Gia Dinh; period: 30 seconds.");
+  if (props.getProperty("INVITE_CODE_HASH")) throw new Error("Mã giới thiệu đã được tạo. Chạy resetInviteCode nếu muốn cấp mã mới.");
+  const code = newInviteCode_();
+  props.setProperty("INVITE_CODE_HASH", hashToken_(code));
+  clearInviteFailures_(props);
+  Logger.log("Mã giới thiệu (6 chữ số): " + code);
 }
 
-function resetAuthenticator() {
+function resetInviteCode() {
   const props = PropertiesService.getScriptProperties();
-  const raw = (Utilities.getUuid().replace(/-/g, "") + Utilities.getUuid().replace(/-/g, "")).slice(0, 40);
-  const secret = hexToBase32_(raw);
-  props.setProperty("TOTP_SECRET", secret);
-  props.deleteProperty("TOTP_LAST_STEP");
-  props.deleteProperty("AUTH_FAIL_STEP");
-  props.deleteProperty("AUTH_FAIL_COUNT");
-  Logger.log("Authenticator seed replaced. Add this new setup key in Google Authenticator: " + secret);
-  Logger.log("All existing device tokens remain valid.");
+  const code = newInviteCode_();
+  props.setProperty("INVITE_CODE_HASH", hashToken_(code));
+  clearInviteFailures_(props);
+  Logger.log("Mã giới thiệu mới (6 chữ số): " + code);
+  Logger.log("Thiết bị đã kích hoạt vẫn được giữ quyền. Chạy revokeAllDevices nếu muốn thu hồi chúng.");
 }
 
 function revokeAllDevices() {
@@ -51,35 +47,8 @@ function revokeAllDevices() {
   Object.keys(props.getProperties()).filter(k => k.indexOf("DEVICE_") === 0).forEach(k => props.deleteProperty(k));
 }
 
-function hexToBase32_(hex) {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  const bytes = hex.match(/.{2}/g).map(x => parseInt(x, 16));
-  let output = "", buffer = 0, bits = 0;
-  bytes.forEach(byte => {
-    buffer = (buffer << 8) | byte; bits += 8;
-    while (bits >= 5) { bits -= 5; output += alphabet[(buffer >> bits) & 31]; buffer &= (1 << bits) - 1; }
-  });
-  if (bits) output += alphabet[(buffer << (5 - bits)) & 31];
-  return output;
-}
-
-function base32ToBytes_(secret) {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-  const bytes = []; let buffer = 0, bits = 0;
-  String(secret).replace(/=+$/, "").toUpperCase().replace(/[^A-Z2-7]/g, "").split("").forEach(ch => {
-    buffer = (buffer << 5) | alphabet.indexOf(ch); bits += 5;
-    if (bits >= 8) { bits -= 8; bytes.push((buffer >> bits) & 255); buffer &= (1 << bits) - 1; }
-  });
-  return bytes;
-}
-
-function totpForStep_(secret, step) {
-  let counter = step; const message = new Array(8).fill(0);
-  for (let i = 7; i >= 0; i--) { message[i] = counter & 255; counter = Math.floor(counter / 256); }
-  const hmac = Utilities.computeHmacSha1Signature(message, base32ToBytes_(secret));
-  const offset = hmac[hmac.length - 1] & 15;
-  const binary = ((hmac[offset] & 127) << 24) | ((hmac[offset + 1] & 255) << 16) | ((hmac[offset + 2] & 255) << 8) | (hmac[offset + 3] & 255);
-  return String(binary % 1000000).padStart(6, "0");
+function newInviteCode_() {
+  return String(parseInt(Utilities.getUuid().replace(/-/g, "").slice(0, 8), 16) % 1000000).padStart(6, "0");
 }
 
 function hashToken_(value) {
@@ -87,34 +56,25 @@ function hashToken_(value) {
     .map(b => (b < 0 ? b + 256 : b).toString(16).padStart(2, "0")).join("");
 }
 
+function clearInviteFailures_(props) {
+  props.deleteProperty("INVITE_FAIL_COUNT");
+  props.deleteProperty("INVITE_LOCKED");
+}
+
 function activateDevice_(code) {
   const lock = LockService.getScriptLock(); lock.waitLock(10000);
   try {
     const props = PropertiesService.getScriptProperties();
-    const secret = props.getProperty("TOTP_SECRET");
-    if (!secret) return json_({ok:false,error:"Authenticator has not been configured by the owner."});
-    const now = Math.floor(Date.now() / 30000);
-    const failStep = Number(props.getProperty("AUTH_FAIL_STEP") || -1);
-    let failures = failStep === now ? Number(props.getProperty("AUTH_FAIL_COUNT") || 0) : 0;
-    const retryAfter = 30 - Math.floor((Date.now() % 30000) / 1000);
-    if (failures >= 3) return json_({ok:false,error:"Three incorrect attempts. Wait for the next Authenticator code.",retryAfter});
-    const candidate = String(code || "").trim();
-    const lastAccepted = Number(props.getProperty("TOTP_LAST_STEP") || -1);
-    let acceptedStep = null;
-    if (/^\d{6}$/.test(candidate)) {
-      for (let offset = -1; offset <= 1; offset++) {
-        const step = now + offset;
-        if (step > lastAccepted && totpForStep_(secret, step) === candidate) acceptedStep = step;
-      }
+    const inviteHash = props.getProperty("INVITE_CODE_HASH");
+    if (!inviteHash) return json_({ok:false,error:"Chủ tủ thuốc chưa tạo mã giới thiệu. Hãy chạy setupInviteCode trong Apps Script."});
+    if (props.getProperty("INVITE_LOCKED") === "1") return json_({ok:false,error:"Đã khóa sau 3 lần nhập sai. Chủ tủ thuốc cần tạo mã mới để mở khóa.",locked:true});
+    if (String(code || "").trim() !== String(code || "").trim().replace(/\D/g, "") || hashToken_(String(code || "").trim()) !== inviteHash) {
+      const failures = Number(props.getProperty("INVITE_FAIL_COUNT") || 0) + 1;
+      props.setProperty("INVITE_FAIL_COUNT", String(failures));
+      if (failures >= 3) props.setProperty("INVITE_LOCKED", "1");
+      return json_({ok:false,error:failures >= 3 ? "Sai 3 lần. Đã khóa đến khi chủ tủ thuốc tạo mã mới." : "Mã giới thiệu không đúng.",attemptsRemaining:Math.max(0,3-failures),locked:failures >= 3});
     }
-    if (acceptedStep === null) {
-      failures++;
-      props.setProperty("AUTH_FAIL_STEP", String(now));
-      props.setProperty("AUTH_FAIL_COUNT", String(failures));
-      return json_({ok:false,error:failures >= 3 ? "Three incorrect attempts. Wait for the next Authenticator code." : "Incorrect or already used code.",attemptsRemaining:Math.max(0,3-failures),retryAfter:failures >= 3 ? retryAfter : 0});
-    }
-    props.setProperty("TOTP_LAST_STEP", String(acceptedStep));
-    props.deleteProperty("AUTH_FAIL_STEP"); props.deleteProperty("AUTH_FAIL_COUNT");
+    clearInviteFailures_(props);
     const token = Utilities.getUuid().replace(/-/g, "") + Utilities.getUuid().replace(/-/g, "");
     props.setProperty("DEVICE_" + hashToken_(token), "1");
     return json_({ok:true,deviceToken:token});
